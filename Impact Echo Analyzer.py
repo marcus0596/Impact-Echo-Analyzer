@@ -16,48 +16,55 @@ import time
 
 
 lvm_folder = 'C:\Users\marcusl\Downloads\Training\Impact-Echo-Analyzer\Files Needing Categorization\lvm'
-delam_folder = 'C:\Users\marcusl\Downloads\Training\Impact Echo Analysis\Delamination'
-non_folder = 'C:\Users\marcusl\Downloads\Training\Impact Echo Analysis\No Delamination'
 
 start = time.time()
 
 class ImpactEcho:
-    def __init__(self,root=lvm_folder,freq_offset=200):
-        self.root = root
-        self.delam_folder = os.path.join(self.root,'Delaminations')
-        self.non_folder = os.path.join(self.root,'Non Delaminations')
-        self.LVM_FILES = [files for files in os.listdir(self.root) if 
+    def __init__(self,root=lvm_folder,freq_offset=200,delam_threshold=5000):
+        self.ROOT = root
+        self.delam_folder = os.path.join(self.ROOT,'Delaminations')
+        self.non_folder = os.path.join(self.ROOT,'Non Delaminations')
+        self.LVM_FILES = [files for files in os.listdir(self.ROOT) if 
                      files.lower().endswith('.lvm')]
         self.FREQ_OFFSET = freq_offset
-        self.FREQ_THRESHOLD=8000
-        self.comments = []
+        self.DELAM_THRESHOLD = delam_threshold
+        self.comments = pd.DataFrame(columns=['filename','comment'])
         
         
     def ffTransform(self,data):
+        # length of the signal
+        n = len(data)  
         
-        n = len(data)  # length of the signal
-    
-        amp = np.fft.fft(data.Acceleration) / n  # fft computing and normalization
+        # fft computing and normalization
+        amp = np.fft.fft(data.Acceleration) / n  
         amp = abs(amp[range(int(n / 2))])
         amp = amp / max(amp)
         
-        return amp[self.FREQ_THRESHOLD:]
+        return amp[self.DELAM_THRESHOLD:]
     
-    def Analysis(self,FREQ_THRESHOLD=8000):
+    def Analysis(self):
         start = time.time()
-        self.FREQ_THRESHOLD = FREQ_THRESHOLD
         
-        # Prepare data
+        
         for i in range(len(self.LVM_FILES)):
-            df = pd.read_csv(os.path.join(self.root,self.LVM_FILES[i]),
+            # Prepare data
+            df = pd.read_csv(os.path.join(self.ROOT,self.LVM_FILES[i]),
                                 skiprows=22, delimiter='\t')
             df.rename(index={0:'X_Value', 1:'Acceleration'})
             amp = self.ffTransform(df)
             
-            if np.argmax(amp)<=self.FREQ_THRESHOLD:
-                self.comments.append([self.LVM_FILES[i],'good'])
+            # Determine if there's a delamination
+            if np.argmax(amp)<=self.DELAM_THRESHOLD:
+                self.comments = self.comments.append({'filename':self.LVM_FILES[i],
+                                      'comment':'good'},ignore_index=True)
             else:
-                self.comments.append([self.LVM_FILES[i],'bad'])
+                self.comments = self.comments.append({'filename':self.LVM_FILES[i],
+                                      'comment':'bad'},ignore_index=True)
+        
+        # Save csv of comments
+        self.comments.to_csv(os.path.join(self.ROOT,'Impact Echo Comments.csv'),
+                             index=False)
+        
         
         timed = round(time.time() - start,3)
         print 'Analysis took {timed} seconds.'.format(timed=timed)
@@ -76,29 +83,38 @@ class ImpactEcho:
         except:
             pass
         
+        # Move files to their respective folders
         for i in range(len(self.comments)):
-            src = os.path.join(self.root,self.comments[i][0])
+            src = os.path.join(self.ROOT,self.comments[i][0])
             if self.comments[i][1]=='good':
-                 dst = os.path.join(self.root,self.non_folder,
+                 dst = os.path.join(self.ROOT,self.non_folder,
                                     self.comments[i][0])
                  shutil.move(src,dst)
             else:
-                 dst = os.path.join(self.root,self.delam_folder,
+                 dst = os.path.join(self.ROOT,self.delam_folder,
                                     self.comments[i][0])
                  shutil.move(src,dst)
                  
     def undo(self):
+        
+        # Check folder existence, then move files to root and delete folder
         if os.path.isdir(self.delam_folder):
             for bad in os.listdir(self.delam_folder):
                 src = os.path.join(self.delam_folder,bad)
-                shutil.move(src,self.root)
-                
+                shutil.move(src,self.ROOT)
+        
+            os.rmdir(self.delam_folder)
+        
+        if os.path.isdir(self.non_folder):        
             for good in os.listdir(self.non_folder):
                 src = os.path.join(self.non_folder,good)
-                shutil.move(src,self.root)
+                shutil.move(src,self.ROOT)
                 
-            os.rmdir(self.delam_folder)
             os.rmdir(self.non_folder)
+            
+        comment_path = os.path.join(self.ROOT,'Impact Echo Comments.csv') 
+        if os.path.isfile(comment_path):
+            os.remove(comment_path)
  
     def Plot(self):
         #Perform FFT
@@ -116,7 +132,8 @@ class ImpactEcho:
         plt.show()
 
 test=os.path.join(lvm_folder,'test')
-ie = ImpactEcho(test)
-ie.moveFiles()
+ie = ImpactEcho(lvm_folder)
+ie.Analysis()
+#ie.moveFiles()
 #ie.undo()
 #ie.Plot()
