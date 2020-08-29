@@ -64,7 +64,7 @@ class Plotter(wx.Panel):
         
         self.figure.tight_layout(pad=4.0)
 
-    def draw(self,x,y,domain):
+    def draw(self,x,y,domain='Time'):
         self.axes.clear()
         if domain == 'Time':
             self.axes.set_xlabel("Time")
@@ -85,6 +85,9 @@ class UserInput(wx.Panel):
         self.graph = top
         self.maxVal_amp = 0
         self.maxVal_freq = 0
+        self.files = []
+        self.root = r''
+        self.file_index = 0
         
         # Folder Selection
         self.folder_Label = wx.TextCtrl(self,-1,'')
@@ -117,6 +120,10 @@ class UserInput(wx.Panel):
         
         self.Bind(wx.EVT_CHECKBOX, self.onChecked)
         
+        # Zoom
+        self.buttonZoom = wx.Button(self,1,"Zoom")
+        self.buttonZoom.Bind(wx.EVT_BUTTON, self.onZoom)
+        
         # File selection
         self.file_select_Label = wx.StaticText(self,wx.ID_ANY,'File #')
         self.file_select = wx.SpinCtrl(self,value='1')
@@ -130,6 +137,9 @@ class UserInput(wx.Panel):
         # Undo
         self.buttonUndo = wx.Button(self,1,"Undo\nAnalysis")
         self.buttonUndo.Bind(wx.EVT_BUTTON, self.onUndo)
+        
+        # File Label
+        self.file_Label = wx.StaticText(self,wx.ID_ANY,'')
         
         # Proportional sizing
         folderSizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -146,16 +156,18 @@ class UserInput(wx.Panel):
         leftSizer.Add(self.peak,0,wx.ALIGN_CENTRE|wx.ALL,5)
         
         midSizer = wx.BoxSizer(wx.VERTICAL)
-        midSizer.Add(self.folderButton,0,wx.ALIGN_LEFT|wx.ALL,5)
+        midSizer.Add(self.folderButton,0,wx.ALIGN_CENTRE|wx.ALL,5)
         midSizer.AddSpacer(5)
         midSizer.Add(self.inputDomain_Time,0,wx.ALIGN_LEFT|wx.ALL,5)
-        midSizer.Add(self.inputDomain_Freq,0,wx.ALIGN_CENTRE|wx.ALL,5)
+        midSizer.Add(self.inputDomain_Freq,0,wx.ALIGN_LEFT|wx.ALL,5)
+        midSizer.Add(self.buttonZoom,0,wx.ALIGN_CENTRE|wx.ALL,5)
         
         rightSizer = wx.BoxSizer(wx.VERTICAL)
-        rightSizer.Add(self.file_select_Label,0,wx.ALIGN_CENTRE|wx.ALL,5)
-        rightSizer.Add(self.file_select,0,wx.ALIGN_CENTRE|wx.ALL,5)
+        rightSizer.Add(self.file_select_Label,0,wx.ALIGN_LEFT|wx.ALL,5)
+        rightSizer.Add(self.file_select,0,wx.ALIGN_LEFT|wx.ALL,5)
         rightSizer.Add(self.buttonAnalyze,0,wx.ALIGN_CENTRE|wx.ALL,5)
         rightSizer.Add(self.buttonUndo,0,wx.ALIGN_CENTRE|wx.ALL,5)
+        rightSizer.Add(self.file_Label,0,wx.ALIGN_LEFT|wx.ALL,5)
        
         inputSizer = wx.BoxSizer(wx.HORIZONTAL)
         inputSizer.Add(leftSizer,0,wx.ALIGN_TOP|wx.ALL,5)
@@ -188,6 +200,7 @@ class UserInput(wx.Panel):
             
             # Proceed loading the file chosen by the user
             pathname = fileDialog.GetPath()
+            self.root = os.path.dirname(pathname)
             
             # Displaying file path on screen
             self.folder_Label.SetValue(pathname)
@@ -199,10 +212,57 @@ class UserInput(wx.Panel):
             except:
                 pass
             
+            self.FILE_NAMES = [file for file in os.listdir(self.root) if
+                                file.lower().endswith('.lvm')]
+            
+            self.files = []
+            if self.folder_Label.GetValue() != '':
+                i = 0
+                for file in self.FILE_NAMES:
+                    self.files.append(os.path.join(self.root,file))
+                    # Drawing chosen pic to screen
+                    if pathname.endswith(file):
+                        self.file_index = i
+                        self.file_select.SetValue(i+1)
+                        path = self.files[i]
+                        self.file = pd.read_csv(path, sep='\t', header=22, 
+                                 usecols=['X_Value', 'Acceleration'])
+                        self.graph.draw(self.file.X_Value,
+                                        self.file.Acceleration,'Time')
+                        self.file_Label.SetLabel(file)
+                    i += 1
+            
+            self.file_select_Label.SetLabel('File #\n{num} of {max}'.format(
+                                 num=self.file_index+1,max=len(self.files)))        
+            self.file_Label.SetLabel(self.FILE_NAMES[self.file_index])
+            
+            self.file_select.SetRange(0,len(self.files)+1)
+            
     def onSubmitFile(self,event):
-        pass
+        if len(self.files) > 0:
+            # Loop value
+            if self.file_select.GetValue() == len(self.files):
+                self.file_select.SetValue(1)
+            elif self.file_select.GetValue() == 0:
+                self.file_select.SetValue(self.file_index)
+            
+            # Iterate through files
+            self.file_index = self.file_select.GetValue()-1
+            path = self.files[self.file_index]
+            self.file = pd.read_csv(path, sep='\t', header=22, 
+                     usecols=['X_Value', 'Acceleration'])
+            self.graph.draw(self.file.X_Value,self.file.Acceleration)
+            self.file_select_Label.SetLabel('File #\n{num} of {max}'.format(
+                                     num=self.file_index+1,max=len(self.files)))
+            self.file_Label.SetLabel(self.FILE_NAMES[self.file_index])
+        else:
+            # Lock value until file is chosen
+            self.file_select.SetValue(1)
     
     def onAnalyze(self,event):
+        pass
+    
+    def onZoom(self,event):
         pass
     
     def onUndo(self,event):
