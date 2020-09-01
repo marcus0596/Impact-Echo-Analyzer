@@ -50,7 +50,6 @@ class Main(wx.Frame):
 class Plotter(wx.Panel):
     def __init__(self,parent):
         super().__init__(parent=parent)
-        self.data = pd.DataFrame(columns=['X_Value','Acceleration'])
         self.freq = []
         self.amp = []
         
@@ -58,13 +57,14 @@ class Plotter(wx.Panel):
         self.figure = Figure()
         self.axes = self.figure.add_subplot(111)  
         self.canvas = FigureCanvas(self,-1,self.figure)
+            
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self.canvas,-1,wx.EXPAND|wx.ALL)
         self.SetSizer(sizer)
         
         self.figure.tight_layout(pad=4.0)
 
-    def draw(self,x,y,domain='Time'):
+    def draw(self,x,y,domain):
         self.axes.clear()
         if domain == 'Time':
             self.axes.set_xlabel("Time")
@@ -88,6 +88,7 @@ class UserInput(wx.Panel):
         self.files = []
         self.root = r''
         self.file_index = 0
+        self.domain = 'Time'
         
         # Folder Selection
         self.folder_Label = wx.TextCtrl(self,-1,'')
@@ -123,6 +124,11 @@ class UserInput(wx.Panel):
         # Zoom
         self.buttonZoom = wx.Button(self,1,"Zoom")
         self.buttonZoom.Bind(wx.EVT_BUTTON, self.onZoom)
+        
+        # Reset zoom
+        self.buttonResetZoom = wx.Button(self,1,'Reset')
+        self.buttonResetZoom.Bind(wx.EVT_BUTTON, self.onResetZoom)
+        self.buttonResetZoom.Hide()
         
         # File selection
         self.file_select_Label = wx.StaticText(self,wx.ID_ANY,'File #')
@@ -161,9 +167,11 @@ class UserInput(wx.Panel):
         midSizer.Add(self.inputDomain_Time,0,wx.ALIGN_LEFT|wx.ALL,5)
         midSizer.Add(self.inputDomain_Freq,0,wx.ALIGN_LEFT|wx.ALL,5)
         midSizer.Add(self.buttonZoom,0,wx.ALIGN_CENTRE|wx.ALL,5)
+        midSizer.Add(self.buttonResetZoom,0,wx.ALIGN_CENTRE|wx.ALL,5)
         
         rightSizer = wx.BoxSizer(wx.VERTICAL)
         rightSizer.Add(self.file_select_Label,0,wx.ALIGN_LEFT|wx.ALL,5)
+        rightSizer.AddSpacer(8)
         rightSizer.Add(self.file_select,0,wx.ALIGN_LEFT|wx.ALL,5)
         rightSizer.Add(self.buttonAnalyze,0,wx.ALIGN_CENTRE|wx.ALL,5)
         rightSizer.Add(self.buttonUndo,0,wx.ALIGN_CENTRE|wx.ALL,5)
@@ -186,7 +194,7 @@ class UserInput(wx.Panel):
         
         # Show data
         if self.inputDomain_Time.GetValue() == True:
-            self.graph.draw(self.data.X_Value,self.data.Acceleration,'Time')
+            self.graph.draw(self.file.X_Value,self.file.Acceleration,'Time')
         else:    
             self.ffTransform()
             self.graph.draw(self.freq, self.amp,'Freq')
@@ -206,12 +214,6 @@ class UserInput(wx.Panel):
             self.folder_Label.SetValue(pathname)
             
             # Reading in data
-            try:
-                self.data = pd.read_csv(pathname, sep='\t', header=22, 
-                                 usecols=['X_Value', 'Acceleration'])
-            except:
-                pass
-            
             self.FILE_NAMES = [file for file in os.listdir(self.root) if
                                 file.lower().endswith('.lvm')]
             
@@ -230,6 +232,7 @@ class UserInput(wx.Panel):
                         self.graph.draw(self.file.X_Value,
                                         self.file.Acceleration,'Time')
                         self.file_Label.SetLabel(file)
+                        
                     i += 1
             
             self.file_select_Label.SetLabel('File #\n{num} of {max}'.format(
@@ -237,6 +240,8 @@ class UserInput(wx.Panel):
             self.file_Label.SetLabel(self.FILE_NAMES[self.file_index])
             
             self.file_select.SetRange(0,len(self.files)+1)
+            self.file_select.SetValue(self.file_index+1)
+            
             
     def onSubmitFile(self,event):
         if len(self.files) > 0:
@@ -251,7 +256,12 @@ class UserInput(wx.Panel):
             path = self.files[self.file_index]
             self.file = pd.read_csv(path, sep='\t', header=22, 
                      usecols=['X_Value', 'Acceleration'])
-            self.graph.draw(self.file.X_Value,self.file.Acceleration)
+            
+            if self.domain == 'Time':
+                self.graph.draw(self.file.X_Value,self.file.Acceleration,'Time')
+            else:
+                self.graph.draw(self.file.X_Value,self.file.Acceleration,'Freq')
+                
             self.file_select_Label.SetLabel('File #\n{num} of {max}'.format(
                                      num=self.file_index+1,max=len(self.files)))
             self.file_Label.SetLabel(self.FILE_NAMES[self.file_index])
@@ -263,6 +273,22 @@ class UserInput(wx.Panel):
         pass
     
     def onZoom(self,event):
+        self.buttonResetZoom.Show()
+        
+        try:
+            x = self.graph.figure.ginput(n=2)
+            print(x)
+            if x[0]<x[1]:
+                self.graph.draw(self.file.X_Value[x[0]:x[1]],self.file.Acceleration)
+            else:
+                self.graph.draw(self.file.X_Value[x[1]:x[0]],self.file.Acceleration)
+        except: 
+            pass
+        
+        self.GetSizer().Layout()
+        self.GetParent().Layout()
+    
+    def onResetZoom(self,event):
         pass
     
     def onUndo(self,event):
@@ -275,18 +301,20 @@ class UserInput(wx.Panel):
         if cb.GetLabel() == 'Time Domain':
             self.inputDomain_Freq.SetValue(False)
             self.inputDomain_Time.SetValue(True)
-            self.graph.draw(self.data.X_Value,self.data.Acceleration,'Time')
+            self.domain = 'Time'
+            self.graph.draw(self.file.X_Value,self.file.Acceleration,'Time')
         else:
             self.inputDomain_Freq.SetValue(True)
             self.inputDomain_Time.SetValue(False)
+            self.domain = 'Freq'
             self.ffTransform()
             self.graph.draw(self.freq, self.amp,'Freq')
         
     def ffTransform(self):
         # calculate signal frequency
-        Fs = 1 / self.data.X_Value[1]
+        Fs = 1 / self.file.X_Value[1]
         # number of samples
-        n = len(self.data)
+        n = len(self.file)
         # time between samples
         Ts = n / Fs
         
@@ -296,7 +324,7 @@ class UserInput(wx.Panel):
         self.freq = np.array(freq[range(int(n / 2))])
         
         # fft computing and normalization of amplitude values
-        amp = np.fft.fft(self.data.Acceleration) / n  
+        amp = np.fft.fft(self.file.Acceleration) / n  
         amp = abs(amp[range(int(n / 2))])
         self.amp = np.array(amp / max(amp))
 
