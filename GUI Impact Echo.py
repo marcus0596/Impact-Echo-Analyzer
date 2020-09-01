@@ -20,6 +20,7 @@ import pandas as pd
 import os
 import shutil
 import time
+import math
 
 class MyApp(wx.App):
     def __init__(self):
@@ -63,12 +64,14 @@ class Plotter(wx.Panel):
         
         self.figure.tight_layout(pad=4.0)
 
-    def draw(self,file,domain):
+    def draw(self,file,domain,**kwargs):
+            
         self.axes.clear()
         if domain == 'Time':
             self.axes.set_xlabel("Time")
             self.axes.set_ylabel("Acceleration")
             self.axes.plot(file.X_Value,file.Acceleration)
+            # print(file.X_Value)
         else:
             if file.freq.size == 0:
                 file.ffTransform()
@@ -76,9 +79,11 @@ class Plotter(wx.Panel):
             self.axes.set_ylabel("Amplitude")
             self.axes.plot(file.freq, file.amp)
             
+        if 'xmin' in kwargs and 'xmax' in kwargs:
+            self.axes.set_xlim(kwargs['xmin'],kwargs['xmax'])
+            
         self.canvas.draw()
-        
-        
+            
         
 class UserInput(wx.Panel):
 
@@ -91,6 +96,7 @@ class UserInput(wx.Panel):
         self.root = r''
         self.file_index = 0
         self.domain = 'Time'
+        self.zoomLevel = 1
         
         # Folder Selection
         self.folder_Label = wx.TextCtrl(self,-1,'')
@@ -108,10 +114,7 @@ class UserInput(wx.Panel):
         self.buttonRange.Bind(wx.EVT_BUTTON, self.onSubmitRange)
         
         # Showing max value on screen
-        self.peak = wx.StaticText(self, -1, 
-                          "Peak amplitude is \n{amp} dB at {freq} Hz"
-                          .format(amp=round(self.maxVal_amp,2), 
-                          freq=round(self.maxVal_freq,2)),style=wx.TE_READONLY)
+        self.peak = wx.StaticText(self, -1,'',style=wx.TE_READONLY)
         
         # Time/ Frequency Domain Selection
         self.inputDomain_Time = wx.CheckBox(parent=self,
@@ -133,7 +136,7 @@ class UserInput(wx.Panel):
         self.buttonResetZoom.Hide()
         
         # File selection
-        self.file_select_Label = wx.StaticText(self,wx.ID_ANY,'File #')
+        self.file_select_Label = wx.StaticText(self,wx.ID_ANY,'File #\n ')
         self.file_select = wx.SpinCtrl(self,value='1')
         self.file_select.Bind(event=wx.EVT_SPINCTRL,
                                handler=self.onSubmitFile)
@@ -153,6 +156,7 @@ class UserInput(wx.Panel):
         folderSizer = wx.BoxSizer(wx.HORIZONTAL)
         folderSizer.AddStretchSpacer(1)
         folderSizer.Add(self.folder_Label,2,wx.EXPAND|wx.ALL,5)
+        folderSizer.Add(self.file_Label,0,wx.ALIGN_CENTRE,5)
         folderSizer.AddStretchSpacer(1)
         
         leftSizer = wx.BoxSizer(wx.VERTICAL)
@@ -172,12 +176,10 @@ class UserInput(wx.Panel):
         midSizer.Add(self.buttonResetZoom,0,wx.ALIGN_CENTRE|wx.ALL,5)
         
         rightSizer = wx.BoxSizer(wx.VERTICAL)
-        rightSizer.Add(self.file_select_Label,0,wx.ALIGN_LEFT|wx.ALL,5)
-        rightSizer.AddSpacer(8)
         rightSizer.Add(self.file_select,0,wx.ALIGN_LEFT|wx.ALL,5)
         rightSizer.Add(self.buttonAnalyze,0,wx.ALIGN_CENTRE|wx.ALL,5)
         rightSizer.Add(self.buttonUndo,0,wx.ALIGN_CENTRE|wx.ALL,5)
-        rightSizer.Add(self.file_Label,0,wx.ALIGN_LEFT|wx.ALL,5)
+        rightSizer.Add(self.file_select_Label,0,wx.ALIGN_LEFT|wx.ALL,5)
        
         inputSizer = wx.BoxSizer(wx.HORIZONTAL)
         inputSizer.Add(leftSizer,0,wx.ALIGN_TOP|wx.ALL,5)
@@ -193,13 +195,6 @@ class UserInput(wx.Panel):
              
     def onSubmitFolder(self,event):
         self.folderSelect()
-        
-        # Show data
-        if self.inputDomain_Time.GetValue() == True:
-            self.graph.draw(self.file,'Time')
-        else:    
-            self.ffTransform()
-            self.graph.draw(self.file,'Freq')
     
     def folderSelect(self):
         with wx.FileDialog(self,"Open Impact Echo File",
@@ -213,7 +208,7 @@ class UserInput(wx.Panel):
             self.root = os.path.dirname(pathname)
             
             # Displaying file path on screen
-            self.folder_Label.SetValue(pathname)
+            self.folder_Label.SetValue(os.path.dirname(pathname))
             
             # Reading in data
             self.FILE_NAMES = [file for file in os.listdir(self.root) if
@@ -230,9 +225,7 @@ class UserInput(wx.Panel):
                         self.file_select.SetValue(i+1)
                         path = self.files[i]
                         self.file = file(path)
-                        self.graph.draw(self.file,'Time')
-                        self.file_Label.SetLabel(self.file.name)
-                        
+                        self.graph.draw(self.file,self.domain)
                     i += 1
             
             self.file_select_Label.SetLabel('File #\n{num} of {max}'.format(
@@ -241,7 +234,9 @@ class UserInput(wx.Panel):
             
             self.file_select.SetRange(0,len(self.files)+1)
             self.file_select.SetValue(self.file_index+1)
-            
+            self.updatePeak()
+            self.GetSizer().Layout()
+            self.GetParent().Layout()
             
     def onSubmitFile(self,event):
         if len(self.files) > 0:
@@ -255,15 +250,16 @@ class UserInput(wx.Panel):
             self.file_index = self.file_select.GetValue()-1
             path = self.files[self.file_index]
             self.file = file(path)
+            self.graph.draw(self.file, self.domain)
             
-            if self.domain == 'Time':
-                self.graph.draw(self.file,'Time')
-            else:
-                self.graph.draw(self.file,'Freq')
-                
+            # Update labels
             self.file_select_Label.SetLabel('File #\n{num} of {max}'.format(
                                      num=self.file_index+1,max=len(self.files)))
             self.file_Label.SetLabel(self.file.name)
+            self.updatePeak()
+            self.GetSizer().Layout()
+            self.GetParent().Layout()
+            
         else:
             # Lock value until file is chosen
             self.file_select.SetValue(1)
@@ -273,24 +269,27 @@ class UserInput(wx.Panel):
     
     def onZoom(self,event):
         self.buttonResetZoom.Show()
-        
-        # need to fix ginput bug
-        # try:
-        x = self.graph.figure.ginput(n=2)
-        print(x)
-        if x[0]<x[1]:
-            self.graph.draw(self.file.X_Value[x[0]:x[1]],self.file.Acceleration)
-        else:
-            self.graph.draw(self.file.X_Value[x[1]:x[0]],self.file.Acceleration)
-        # except: 
-        #     pass
-        
         self.GetSizer().Layout()
         self.GetParent().Layout()
+        self.zoomLevel += 1
+        size = self.file.amp.size/2
+        mod = size/math.log(self.zoomLevel,1.5)
+        
+        xmin = self.file.maxval_Index_amp - mod
+        xmax = self.file.maxval_Index_amp + mod
+        
+        if xmin < 0:
+            xmin = 0
+        if xmax > size:
+            xmax = size
+        
+        kwargs = {'xmin':xmin,'xmax':xmax}
+        self.graph.draw(self.file,self.domain,**kwargs)        
     
     def onResetZoom(self,event):
+        self.zoomLevel = 1
+        self.graph.draw(self.file,self.domain)
         self.buttonResetZoom.Hide()
-        pass
     
     def onUndo(self,event):
         pass
@@ -304,22 +303,34 @@ class UserInput(wx.Panel):
             self.inputDomain_Time.SetValue(True)
             self.domain = 'Time'
             self.graph.draw(self.file,'Time')
+            self.peak.SetLabel('')
         else:
             self.inputDomain_Freq.SetValue(True)
             self.inputDomain_Time.SetValue(False)
             self.domain = 'Freq'
             self.graph.draw(self.file,'Freq')
+            self.updatePeak()
         
     def onSubmitRange(self,event):
-        try:
-            minX = int(self.min_X.GetValue())
-            maxX = int(self.max_X.GetValue())
+        self.updatePeak()
             
+    def updatePeak(self):
+        try:
+            # Getting max value
+            self.minX = int(self.min_X.GetValue())
+            self.maxX = int(self.max_X.GetValue())
+            maxVal_freq, maxVal_amp = self.file.domainRange(self.minX, self.maxX)
+                
             # Showing max value on screen
-            self.peak.SetLabel(self.file.domainRange(minX,maxX))
+            self.peak.SetLabel("Peak amplitude is \n{amp} dB at {freq} Hz"
+                              .format(amp=maxVal_amp, 
+                              freq=maxVal_freq))
+            self.GetSizer().Layout()
+            self.GetParent().Layout()
         except:
-            print('Invalid values.')
-    
+            if self.file.freq.size != 0:
+                print('Invalid range values.')
+        
 class file:
     def __init__(self, path):
         self.name = os.path.basename(path)
@@ -357,15 +368,12 @@ class file:
         idx_max = (np.abs(self.freq - max_X)).argmin()
         
         # Index of max amplitude inside frequency range
-        maxval_Index = self.amp[idx_min:idx_max].argmax()
+        self.maxval_Index_amp = self.amp[idx_min:idx_max].argmax()
         
         # Declaring max values inside frequency range
-        self.maxVal_freq = round(self.freq[maxval_Index])
-        self.maxVal_amp = round(self.amp[maxval_Index],2)
-        self.peak =("Peak amplitude is \n{amp} dB at {freq} Hz"
-                              .format(amp=self.maxVal_amp, 
-                              freq=self.maxVal_freq))
-        return self.peak
+        maxVal_freq = round(self.freq[self.maxval_Index_amp])
+        maxVal_amp = round(self.amp[self.maxval_Index_amp],3)
+        return maxVal_freq, maxVal_amp
         
 # if this file is ran (not imported)
 if __name__ == "__main__":
