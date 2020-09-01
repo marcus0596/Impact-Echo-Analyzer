@@ -14,7 +14,7 @@
 
 import wx
 from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg as FigureCanvas
-from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import os
@@ -44,18 +44,17 @@ class Main(wx.Frame):
         splitter.SplitHorizontally(top,bottom)
         splitter.SetMinimumPaneSize(300)
         
-        top.draw([0],[0],'Time')
+        # top.draw([0],[0],'Time')
         
 
 class Plotter(wx.Panel):
     def __init__(self,parent):
         super().__init__(parent=parent)
-        self.freq = []
-        self.amp = []
         
         # matplotlib has nice functionally with wxPython
-        self.figure = Figure()
-        self.axes = self.figure.add_subplot(111)  
+        self.figure, self.axes = plt.subplots() 
+        self.axes.set_xlabel("Time")
+        self.axes.set_ylabel("Acceleration")
         self.canvas = FigureCanvas(self,-1,self.figure)
             
         sizer = wx.BoxSizer(wx.VERTICAL)
@@ -64,16 +63,19 @@ class Plotter(wx.Panel):
         
         self.figure.tight_layout(pad=4.0)
 
-    def draw(self,x,y,domain):
+    def draw(self,file,domain):
         self.axes.clear()
         if domain == 'Time':
             self.axes.set_xlabel("Time")
             self.axes.set_ylabel("Acceleration")
+            self.axes.plot(file.X_Value,file.Acceleration)
         else:
+            if file.freq.size == 0:
+                file.ffTransform()
             self.axes.set_xlabel("Frequency")
             self.axes.set_ylabel("Amplitude")
+            self.axes.plot(file.freq, file.amp)
             
-        self.axes.plot(x,y)
         self.canvas.draw()
         
         
@@ -194,10 +196,10 @@ class UserInput(wx.Panel):
         
         # Show data
         if self.inputDomain_Time.GetValue() == True:
-            self.graph.draw(self.file.X_Value,self.file.Acceleration,'Time')
+            self.graph.draw(self.file,'Time')
         else:    
             self.ffTransform()
-            self.graph.draw(self.freq, self.amp,'Freq')
+            self.graph.draw(self.file,'Freq')
     
     def folderSelect(self):
         with wx.FileDialog(self,"Open Impact Echo File",
@@ -220,24 +222,22 @@ class UserInput(wx.Panel):
             self.files = []
             if self.folder_Label.GetValue() != '':
                 i = 0
-                for file in self.FILE_NAMES:
-                    self.files.append(os.path.join(self.root,file))
+                for name in self.FILE_NAMES:
+                    self.files.append(os.path.join(self.root,name))
                     # Drawing chosen pic to screen
-                    if pathname.endswith(file):
+                    if pathname.endswith(name):
                         self.file_index = i
                         self.file_select.SetValue(i+1)
                         path = self.files[i]
-                        self.file = pd.read_csv(path, sep='\t', header=22, 
-                                 usecols=['X_Value', 'Acceleration'])
-                        self.graph.draw(self.file.X_Value,
-                                        self.file.Acceleration,'Time')
-                        self.file_Label.SetLabel(file)
+                        self.file = file(path)
+                        self.graph.draw(self.file,'Time')
+                        self.file_Label.SetLabel(self.file.name)
                         
                     i += 1
             
             self.file_select_Label.SetLabel('File #\n{num} of {max}'.format(
                                  num=self.file_index+1,max=len(self.files)))        
-            self.file_Label.SetLabel(self.FILE_NAMES[self.file_index])
+            self.file_Label.SetLabel(self.file.name)
             
             self.file_select.SetRange(0,len(self.files)+1)
             self.file_select.SetValue(self.file_index+1)
@@ -254,17 +254,16 @@ class UserInput(wx.Panel):
             # Iterate through files
             self.file_index = self.file_select.GetValue()-1
             path = self.files[self.file_index]
-            self.file = pd.read_csv(path, sep='\t', header=22, 
-                     usecols=['X_Value', 'Acceleration'])
+            self.file = file(path)
             
             if self.domain == 'Time':
-                self.graph.draw(self.file.X_Value,self.file.Acceleration,'Time')
+                self.graph.draw(self.file,'Time')
             else:
-                self.graph.draw(self.file.X_Value,self.file.Acceleration,'Freq')
+                self.graph.draw(self.file,'Freq')
                 
             self.file_select_Label.SetLabel('File #\n{num} of {max}'.format(
                                      num=self.file_index+1,max=len(self.files)))
-            self.file_Label.SetLabel(self.FILE_NAMES[self.file_index])
+            self.file_Label.SetLabel(self.file.name)
         else:
             # Lock value until file is chosen
             self.file_select.SetValue(1)
@@ -275,20 +274,22 @@ class UserInput(wx.Panel):
     def onZoom(self,event):
         self.buttonResetZoom.Show()
         
-        try:
-            x = self.graph.figure.ginput(n=2)
-            print(x)
-            if x[0]<x[1]:
-                self.graph.draw(self.file.X_Value[x[0]:x[1]],self.file.Acceleration)
-            else:
-                self.graph.draw(self.file.X_Value[x[1]:x[0]],self.file.Acceleration)
-        except: 
-            pass
+        # need to fix ginput bug
+        # try:
+        x = self.graph.figure.ginput(n=2)
+        print(x)
+        if x[0]<x[1]:
+            self.graph.draw(self.file.X_Value[x[0]:x[1]],self.file.Acceleration)
+        else:
+            self.graph.draw(self.file.X_Value[x[1]:x[0]],self.file.Acceleration)
+        # except: 
+        #     pass
         
         self.GetSizer().Layout()
         self.GetParent().Layout()
     
     def onResetZoom(self,event):
+        self.buttonResetZoom.Hide()
         pass
     
     def onUndo(self,event):
@@ -302,40 +303,54 @@ class UserInput(wx.Panel):
             self.inputDomain_Freq.SetValue(False)
             self.inputDomain_Time.SetValue(True)
             self.domain = 'Time'
-            self.graph.draw(self.file.X_Value,self.file.Acceleration,'Time')
+            self.graph.draw(self.file,'Time')
         else:
             self.inputDomain_Freq.SetValue(True)
             self.inputDomain_Time.SetValue(False)
             self.domain = 'Freq'
-            self.ffTransform()
-            self.graph.draw(self.freq, self.amp,'Freq')
+            self.graph.draw(self.file,'Freq')
         
+    def onSubmitRange(self,event):
+        try:
+            minX = int(self.min_X.GetValue())
+            maxX = int(self.max_X.GetValue())
+            
+            # Showing max value on screen
+            self.peak.SetLabel(self.file.domainRange(minX,maxX))
+        except:
+            print('Invalid values.')
+    
+class file:
+    def __init__(self, path):
+        self.name = os.path.basename(path)
+        self.FREQ_OFFSET = 200
+        
+        data = pd.read_csv(path, sep='\t', header=22, 
+                     usecols=['X_Value', 'Acceleration'])
+        self.X_Value = data.X_Value
+        self.Acceleration = data.Acceleration
+        self.freq = np.array([])
+        self.amp = np.array([])
+    
     def ffTransform(self):
         # calculate signal frequency
-        Fs = 1 / self.file.X_Value[1]
+        Fs = 1 / self.X_Value[1]
         # number of samples
-        n = len(self.file)
+        n = len(self.X_Value)
         # time between samples
         Ts = n / Fs
         
         # frequency range (with both sides)
         freq = np.arange(n) / Ts
         # one side frequency range
-        self.freq = np.array(freq[range(int(n / 2))])
+        self.freq = np.array(freq[range(int(n / 2))])[self.FREQ_OFFSET:]
         
         # fft computing and normalization of amplitude values
-        amp = np.fft.fft(self.file.Acceleration) / n  
+        amp = np.fft.fft(self.Acceleration) / n  
         amp = abs(amp[range(int(n / 2))])
-        self.amp = np.array(amp / max(amp))
+        self.amp = np.array(amp / max(amp))[self.FREQ_OFFSET:]
 
-    def domainRange(self):
-        
-        if self.inputDomain_Time.GetValue() == True:
-            return
-        
-        # Getting bounds range
-        min_X = int(self.min_X.GetValue())
-        max_X = int(self.max_X.GetValue())
+    def domainRange(self,min_X,max_X):
         
         # Getting x values closest to range inclusive
         idx_min = (np.abs(self.freq - min_X)).argmin()
@@ -347,16 +362,11 @@ class UserInput(wx.Panel):
         # Declaring max values inside frequency range
         self.maxVal_freq = round(self.freq[maxval_Index])
         self.maxVal_amp = round(self.amp[maxval_Index],2)
+        self.peak =("Peak amplitude is \n{amp} dB at {freq} Hz"
+                              .format(amp=self.maxVal_amp, 
+                              freq=self.maxVal_freq))
+        return self.peak
         
-        # Showing max value on screen
-        self.peak.SetLabel("Peak amplitude is \n{amp} dB at {freq} Hz"
-                          .format(amp=self.maxVal_amp, 
-                          freq=self.maxVal_freq))
-        
-    def onSubmitRange(self,event):
-        self.domainRange()
-        
-   
 # if this file is ran (not imported)
 if __name__ == "__main__":
     app = MyApp()
