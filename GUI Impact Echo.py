@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """
  Marcus Lowry
- August 27, 2020
+ Sept 2, 2020
  Python 3.8
  
  Importing data from Impact Echo tests and plotting the response
  Sort Impact Echo .lvm files into delam/ non-delam folders
  
  To Do:
- Be able to select range with mouse
- Display max value on graph 
+ Analyze and undoAnalysis functions
+     Time domain data quality check
+     Freq domain threshold
 """
 
 import wx
@@ -32,7 +33,6 @@ class MyApp(wx.App):
         frame.Show()
         self.SetTopWindow(frame)
         
-        
 class Main(wx.Frame):
     
     def __init__(self,parent,title,pos,size):
@@ -43,10 +43,7 @@ class Main(wx.Frame):
         top = Plotter(splitter)
         bottom = UserInput(splitter, top)
         splitter.SplitHorizontally(top,bottom)
-        splitter.SetMinimumPaneSize(300)
-        
-        # top.draw([0],[0],'Time')
-        
+        splitter.SetMinimumPaneSize(300)        
 
 class Plotter(wx.Panel):
     def __init__(self,parent):
@@ -61,29 +58,24 @@ class Plotter(wx.Panel):
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self.canvas,-1,wx.EXPAND|wx.ALL)
         self.SetSizer(sizer)
-        
         self.figure.tight_layout(pad=4.0)
 
     def draw(self,file,domain,**kwargs):
-            
+        # Update plot
         self.axes.clear()
         if domain == 'Time':
             self.axes.set_xlabel("Time")
             self.axes.set_ylabel("Acceleration")
             self.axes.plot(file.X_Value,file.Acceleration)
-            # print(file.X_Value)
         else:
-            if file.freq.size == 0:
-                file.ffTransform()
             self.axes.set_xlabel("Frequency")
             self.axes.set_ylabel("Amplitude")
             self.axes.plot(file.freq, file.amp)
-            
+        
+        # Set zoom level
         if 'xmin' in kwargs and 'xmax' in kwargs:
             self.axes.set_xlim(kwargs['xmin'],kwargs['xmax'])
-            
         self.canvas.draw()
-            
         
 class UserInput(wx.Panel):
 
@@ -96,7 +88,8 @@ class UserInput(wx.Panel):
         self.root = r''
         self.file_index = 0
         self.domain = 'Time'
-        self.zoomLevel = 1
+        self.zoomLevel = math.e
+        self.mod = 1000
         
         # Folder Selection
         self.folder_Label = wx.TextCtrl(self,-1,'')
@@ -136,7 +129,7 @@ class UserInput(wx.Panel):
         self.buttonResetZoom.Hide()
         
         # File selection
-        self.file_select_Label = wx.StaticText(self,wx.ID_ANY,'File #\n ')
+        self.file_select_Label = wx.StaticText(self,wx.ID_ANY,'')
         self.file_select = wx.SpinCtrl(self,value='1')
         self.file_select.Bind(event=wx.EVT_SPINCTRL,
                                handler=self.onSubmitFile)
@@ -191,52 +184,52 @@ class UserInput(wx.Panel):
         mainSizer.Add(inputSizer,0,wx.ALIGN_CENTRE)
         mainSizer.Layout()
         self.SetSizer(mainSizer)
-        
              
     def onSubmitFolder(self,event):
         self.folderSelect()
     
     def folderSelect(self):
         with wx.FileDialog(self,"Open Impact Echo File",
-                           wildcard="LVM files (*.lvm)|*.lvm",
-                           style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as fileDialog:
+                    wildcard="LVM files (*.lvm)|*.lvm",
+                    style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as fileDialog:
             if fileDialog.ShowModal() == wx.ID_CANCEL:
                 return     # the user changed their mind
             
             # Proceed loading the file chosen by the user
             pathname = fileDialog.GetPath()
             self.root = os.path.dirname(pathname)
-            
-            # Displaying file path on screen
-            self.folder_Label.SetValue(os.path.dirname(pathname))
-            
-            # Reading in data
-            self.FILE_NAMES = [file for file in os.listdir(self.root) if
-                                file.lower().endswith('.lvm')]
-            
-            self.files = []
-            if self.folder_Label.GetValue() != '':
-                i = 0
-                for name in self.FILE_NAMES:
-                    self.files.append(os.path.join(self.root,name))
-                    # Drawing chosen pic to screen
-                    if pathname.endswith(name):
-                        self.file_index = i
-                        self.file_select.SetValue(i+1)
-                        path = self.files[i]
-                        self.file = file(path)
-                        self.graph.draw(self.file,self.domain)
-                    i += 1
-            
-            self.file_select_Label.SetLabel('File #\n{num} of {max}'.format(
-                                 num=self.file_index+1,max=len(self.files)))        
-            self.file_Label.SetLabel(self.file.name)
-            
-            self.file_select.SetRange(0,len(self.files)+1)
-            self.file_select.SetValue(self.file_index+1)
-            self.updatePeak()
-            self.GetSizer().Layout()
-            self.GetParent().Layout()
+        
+        # Displaying file path on screen
+        self.folder_Label.SetValue(os.path.dirname(pathname))
+        
+        # Reading in data
+        self.FILE_NAMES = [file for file in os.listdir(self.root) if
+                            file.lower().endswith('.lvm')]
+        self.files = []
+        if self.folder_Label.GetValue() != '':
+            i = 0
+            for name in self.FILE_NAMES:
+                self.files.append(os.path.join(self.root,name))
+                # Drawing chosen pic to screen
+                if pathname.endswith(name):
+                    self.file_index = i
+                    self.file_select.SetValue(i+1)
+                    path = self.files[i]
+                    self.file = file(path)
+                    self.graph.draw(self.file,self.domain)
+                i += 1
+        
+        # Update labels
+        self.file_select_Label.SetLabel('File #\n{num} of {max}'.format(
+                             num=self.file_index+1,max=len(self.files)))        
+        self.file_Label.SetLabel(self.file.name)
+        self.file_select.SetRange(0,len(self.files)+1)
+        self.file_select.SetValue(self.file_index+1)
+        self.updatePeak()
+        self.mod_time = round(self.file.Acceleration.idxmax()/2)
+        self.mod_freq = round(self.file.amp.argmax()*3)
+        self.GetSizer().Layout()
+        self.GetParent().Layout()
             
     def onSubmitFile(self,event):
         if len(self.files) > 0:
@@ -250,16 +243,16 @@ class UserInput(wx.Panel):
             self.file_index = self.file_select.GetValue()-1
             path = self.files[self.file_index]
             self.file = file(path)
-            self.graph.draw(self.file, self.domain)
+            
+            # Keeping zoom level
+            xlims = self.setZoom()
+            self.graph.draw(self.file, self.domain, **xlims)
             
             # Update labels
             self.file_select_Label.SetLabel('File #\n{num} of {max}'.format(
                                      num=self.file_index+1,max=len(self.files)))
             self.file_Label.SetLabel(self.file.name)
             self.updatePeak()
-            self.GetSizer().Layout()
-            self.GetParent().Layout()
-            
         else:
             # Lock value until file is chosen
             self.file_select.SetValue(1)
@@ -267,49 +260,85 @@ class UserInput(wx.Panel):
     def onAnalyze(self,event):
         pass
     
+    def onUndo(self,event):
+        pass
+    
     def onZoom(self,event):
+        # Setting zoom level
+        self.zoomLevel += 1
+        xlims = self.setZoom()
+        self.graph.draw(self.file,self.domain,**xlims)    
+        
+        # Showing reset zoom button
         self.buttonResetZoom.Show()
         self.GetSizer().Layout()
         self.GetParent().Layout()
-        self.zoomLevel += 1
-        size = self.file.amp.size/2
-        mod = size/math.log(self.zoomLevel,1.5)
         
-        xmin = self.file.maxval_Index_amp - mod
-        xmax = self.file.maxval_Index_amp + mod
+    def setZoom(self):
+        if self.domain == 'Time':
+            # Setting midpoint and upper bound
+            mid_id = self.file.Acceleration.idxmax()
+            size = self.file.X_Value.size
+            
+            # Setting indices of zoom range
+            xmin_id = mid_id - self.mod_time
+            xmax_id = mid_id + self.mod_time*5 
+            if xmin_id < 0:
+                xmin_id = 0
+            if xmax_id > size-1:
+                xmax_id = size-1
+            xmin = self.file.X_Value[xmin_id]
+            xmax = self.file.X_Value[xmax_id]
+            
+            # Updating modification amount
+            self.mod_time = round((mid_id-xmin_id)/math.log(self.zoomLevel))
+        else:
+            # Setting midpoint and upper bound
+            mid_id = self.file.amp.argmax()
+            size = self.file.freq.size
+            
+            # Setting indices of zoom range
+            xmin_id = mid_id - self.mod_freq
+            xmax_id = mid_id + self.mod_freq
+            if xmin_id < 0:
+                xmin_id = 0
+            if xmax_id > size-1:
+                xmax_id = size-1
+            xmin = self.file.freq[xmin_id]
+            xmax = self.file.freq[xmax_id]
+            
+            # Updating modification amount
+            self.mod_freq = round((mid_id-xmin_id)/(math.log(self.zoomLevel)))*2
         
+        # Lower bound
         if xmin < 0:
             xmin = 0
-        if xmax > size:
-            xmax = size
-        
-        kwargs = {'xmin':xmin,'xmax':xmax}
-        self.graph.draw(self.file,self.domain,**kwargs)        
+            
+        # Plotter.draw **kwargs
+        xlims = {'xmin':xmin,'xmax':xmax}
+        return xlims
     
     def onResetZoom(self,event):
+        # Resetting plot and hiding button
         self.zoomLevel = 1
         self.graph.draw(self.file,self.domain)
         self.buttonResetZoom.Hide()
-    
-    def onUndo(self,event):
-        pass
         
     def onChecked(self, event):
-        
         cb = event.GetEventObject()
         # Alternating checkboxes
         if cb.GetLabel() == 'Time Domain':
             self.inputDomain_Freq.SetValue(False)
             self.inputDomain_Time.SetValue(True)
             self.domain = 'Time'
-            self.graph.draw(self.file,'Time')
-            self.peak.SetLabel('')
         else:
             self.inputDomain_Freq.SetValue(True)
             self.inputDomain_Time.SetValue(False)
             self.domain = 'Freq'
-            self.graph.draw(self.file,'Freq')
-            self.updatePeak()
+        
+        # Plot and update interface
+        self.graph.draw(self.file,self.domain)
+        self.updatePeak()
         
     def onSubmitRange(self,event):
         self.updatePeak()
@@ -319,29 +348,37 @@ class UserInput(wx.Panel):
             # Getting max value
             self.minX = int(self.min_X.GetValue())
             self.maxX = int(self.max_X.GetValue())
-            maxVal_freq, maxVal_amp = self.file.domainRange(self.minX, self.maxX)
-                
+            maxVal_x, maxVal_y = self.file.domainRange(self.minX, 
+                                                        self.maxX,self.domain)
+            
             # Showing max value on screen
-            self.peak.SetLabel("Peak amplitude is \n{amp} dB at {freq} Hz"
-                              .format(amp=maxVal_amp, 
-                              freq=maxVal_freq))
+            if self.domain == 'Freq':
+                self.peak.SetLabel("Peak amplitude is \n{amp} dB at {freq} Hz"
+                                  .format(amp=maxVal_y, 
+                                  freq=maxVal_x))
+            else:
+                self.peak.SetLabel("Peak amplitude is \n{amp} dB at {time} s"
+                                  .format(amp=maxVal_y, 
+                                  time=maxVal_x))
+            # Updating interface
             self.GetSizer().Layout()
             self.GetParent().Layout()
         except:
-            if self.file.freq.size != 0:
-                print('Invalid range values.')
+            print('Invalid range values.')
         
 class file:
     def __init__(self, path):
-        self.name = os.path.basename(path)
+
         self.FREQ_OFFSET = 200
         
+        # Read in data
+        self.name = os.path.basename(path)
         data = pd.read_csv(path, sep='\t', header=22, 
                      usecols=['X_Value', 'Acceleration'])
         self.X_Value = data.X_Value
         self.Acceleration = data.Acceleration
-        self.freq = np.array([])
-        self.amp = np.array([])
+        self.maxval_Index_time = data.Acceleration.idxmax()
+        self.ffTransform()
     
     def ffTransform(self):
         # calculate signal frequency
@@ -361,19 +398,24 @@ class file:
         amp = abs(amp[range(int(n / 2))])
         self.amp = np.array(amp / max(amp))[self.FREQ_OFFSET:]
 
-    def domainRange(self,min_X,max_X):
+    def domainRange(self,min_X,max_X,domain):
         
-        # Getting x values closest to range inclusive
-        idx_min = (np.abs(self.freq - min_X)).argmin()
-        idx_max = (np.abs(self.freq - max_X)).argmin()
-        
-        # Index of max amplitude inside frequency range
-        self.maxval_Index_amp = self.amp[idx_min:idx_max].argmax()
-        
-        # Declaring max values inside frequency range
-        maxVal_freq = round(self.freq[self.maxval_Index_amp])
-        maxVal_amp = round(self.amp[self.maxval_Index_amp],3)
-        return maxVal_freq, maxVal_amp
+        if domain == 'Freq':
+            # Getting x values closest to range 
+            idx_min = (np.abs(self.freq - min_X)).argmin()
+            idx_max = (np.abs(self.freq - max_X)).argmin()
+            
+            # Index of max amplitude inside frequency range
+            self.maxval_Index_freq = self.amp[idx_min:idx_max].argmax()
+            
+            # Declaring max values inside frequency range
+            maxVal_freq = round(self.freq[self.maxval_Index_freq])
+            maxVal_amp = round(self.amp[self.maxval_Index_freq],3)
+            return maxVal_freq, maxVal_amp
+        else:
+            maxVal_time = round(self.X_Value[self.maxval_Index_time],3)
+            maxVal_amp = round(self.Acceleration[self.maxval_Index_time],3)
+            return maxVal_time, maxVal_amp
         
 # if this file is ran (not imported)
 if __name__ == "__main__":
@@ -382,6 +424,5 @@ if __name__ == "__main__":
     app.ExitMainLoop()
     
     del app
-#    raise Exception('exit')
     
 
